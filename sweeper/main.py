@@ -1,3 +1,4 @@
+import re
 import tiktoken
 import asyncio
 import json
@@ -136,7 +137,7 @@ Your job is to extract the following information:
 """
 
 
-class ServiceBusinessVertical(str, Enum):
+class BusinessVertical(str, Enum):
     ACCOUNTING = "Accounting"
     ADVERTISING = "Advertising"
     ARCHITECTURE = "Architecture"
@@ -144,18 +145,23 @@ class ServiceBusinessVertical(str, Enum):
     BUSINESS_CONSULTING = "Business Consulting"
     CATERING = "Catering"
     CLEANING = "Cleaning"
+    BEAUTY = "Beauty"
     CONSTRUCTION = "Construction"
     DESIGN = "Design"
     EDUCATION = "Education"
     ENGINEERING = "Engineering"
     ENTERTAINMENT = "Entertainment"
     EVENT_PLANNING = "Event Planning"
+    FASHION = "Fashion"
     FINANCIAL_SERVICES = "Financial Services"
+    HAIR = "Hair"
+    HOME_AND_LIVING = "Home and Living"
     HEALTHCARE = "Healthcare"
     HOSPITALITY = "Hospitality"
     HUMAN_RESOURCES = "Human Resources"
     INFORMATION_TECHNOLOGY = "Information Technology"
     INSURANCE = "Insurance"
+    JEWELRY = "Jewelry"
     LANDSCAPING = "Landscaping"
     LEGAL = "Legal"
     LOGISTICS = "Logistics"
@@ -164,9 +170,11 @@ class ServiceBusinessVertical(str, Enum):
     PHOTOGRAPHY = "Photography"
     PROPERTY_MANAGEMENT = "Property Management"
     PUBLIC_RELATIONS = "Public Relations"
+    RETAIL = "Retail"
     REAL_ESTATE = "Real Estate"
     RECRUITMENT = "Recruitment"
     SECURITY = "Security"
+    TOURISM = "Tourism"
     TELECOMMUNICATIONS = "Telecommunications"
     TRANSPORTATION = "Transportation"
     TRAVEL = "Travel"
@@ -176,8 +184,9 @@ class ServiceBusinessVertical(str, Enum):
 
 class PageClassification(BaseModel):
     contact_information: Optional[str] = None
-    vertical: str
+    vertical: BusinessVertical
     is_shopify: bool
+    is_service_probability: int
 
 
 class Store(BaseModel):
@@ -197,9 +206,10 @@ The following is the HTML of the home page of a potential Shopify store.
 
 Your goal is to determine the following:
 
-* is_shopify: if it is a Shopify store by looking at the HTML and returning a boolean.
-* vertical: the vertical of the store by looking at the HTML and returning a ServiceBusinessVertical. If you are not sure, return the vertical as Others.
-* contact_information: a link to the contact page of the store, or the email address of the store if any. If you are not sure, return nothing.
+* is_shopify: if it is a Shopify store, return True, else False.
+* vertical: the vertical of the store. return one of BusinessVertical. If you are not sure, return Others.
+* contact_information: a link to the contact page of the store, or the email address of the store if any. If you are not sure, return None.
+* is_service_probability: the probability that the store is a service business, expressed as a number between 0 and 100.
 """
 
 
@@ -265,9 +275,12 @@ async def run(playwright: Playwright):
     print(f"Found {len(classifications)} stores: {classifications}")
     # add the stores to a csv
     with open("stores.csv", "w") as f:
+        f.write(
+            "name,url,vertical,is_shopify,is_service_probability,contact_information\n"
+        )
         for classification in classifications:
             f.write(
-                f"{classification.name},{classification.url},{classification.vertical},{classification.is_shopify},{classification.contact_information}\n"
+                f"{classification.name},{classification.url},{classification.vertical},{classification.is_shopify},{classification.is_service_probability},{classification.contact_information}\n"
             )
 
     await browser.close()
@@ -378,6 +391,23 @@ async def classify_store(llm: Instructor, model: str, store_name: str, store_url
                 f"Failed to classify {store_name} at {store_url}: {e}\n{traceback.format_exc()}"
             )
             return None
+
+
+def is_email(string):
+    pattern = r"^(?:mailto:)?[\w\.-]+@[\w\.-]+\.\w+$"
+    return re.match(pattern, string) is not None
+
+
+def join_url(full_url: str, path_or_full_url: str) -> str:
+    # if email return
+    if is_email(path_or_full_url):
+        return path_or_full_url
+    elif path_or_full_url.startswith("http"):
+        return path_or_full_url
+    elif path_or_full_url.startswith("/"):
+        return f"{full_url}{path_or_full_url}"
+    else:
+        return f"https://{path_or_full_url}"
 
 
 async def fetch_html(url: str):
