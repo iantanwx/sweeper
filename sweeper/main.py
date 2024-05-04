@@ -1,8 +1,7 @@
-import re
-import tiktoken
 import asyncio
 import json
 import os
+import re
 import traceback
 from asyncio import Semaphore
 from enum import Enum
@@ -11,7 +10,8 @@ from urllib.parse import urlparse
 
 import aiohttp
 import instructor
-from bs4 import BeautifulSoup
+import tiktoken
+from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 
 # from groq import AsyncGroq
@@ -198,10 +198,16 @@ class Store(BaseModel):
 
 
 prompt_is_shopify_store = """
-The following is the HTML of the home page of a potential Shopify store. 
+Respectively, the following is the contents of the <head> tag, and the <body> of the home page of a potential Shopify store. 
 
+<head> tag:
 ```html
-{store}
+{head}
+```
+
+<body> tag:
+```html
+{body}
 ```
 
 Your goal is to determine the following:
@@ -333,6 +339,21 @@ async def search_store(llm: Instructor, model: str, store_name: str):
             ]
 
 
+def clean_html(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    head = soup.head
+    body = soup.body
+    # now strip every unnecessary attribute from <body> to save tokens.
+    # only preserve `href` because we want to find contact details, and there may be semantically meaningful links, e.g. to shopify URLs.
+    for tag in body.descendants:
+        if isinstance(tag, Tag) and tag.attrs:
+            for attr in tag.attrs:
+                if attr != "href":
+                    del tag.attrs[attr]
+
+    return head.str(), body.str()
+
+
 async def classify_store(llm: Instructor, model: str, store_name: str, store_url: str):
     """
     Classify the store as a Shopify store.
@@ -358,13 +379,16 @@ async def classify_store(llm: Instructor, model: str, store_name: str, store_url
             visited_stores.add(store_name)
             print(f"Classifying {store_name} at {store_url}")
             html = await fetch_html(store_url)
-            if count_tokens(html) > MAX_TOKENS_PER_STORE:
+            head, body = clean_html(html)
+            head_token_count, body_token_count = count_tokens(head), count_tokens(body)
+            if head_token_count + body_token_count > MAX_TOKENS_PER_STORE:
                 print(
                     f"Truncating {store_name} at {store_url} because its home page has too many tokens"
                 )
                 encoding = tiktoken.encoding_for_model(model)
-                tokens = encoding.encode(html)
-                html = encoding.decode(tokens[:MAX_TOKENS_PER_STORE])
+                body_tokens = encoding.encode(body)
+                max_tokens = MAX_TOKENS_PER_STORE - head_token_count
+                body = encoding.decode(body_tokens[:max_tokens])
             classification = await llm.chat.completions.create(
                 messages=[
                     {
@@ -373,7 +397,7 @@ async def classify_store(llm: Instructor, model: str, store_name: str, store_url
                     },
                     {
                         "role": "user",
-                        "content": prompt_is_shopify_store.format(store=html),
+                        "content": prompt_is_shopify_store.format(head=head, body=body),
                     },
                 ],
                 model=model,
