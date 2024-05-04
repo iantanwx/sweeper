@@ -477,6 +477,11 @@ async def extract_reviewers(browser: Browser, app: ShopifyApp):
 
 async def extract_app_info(llm: Instructor, model: str, html: str):
     async with openai_sem:
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.descendants:
+            if isinstance(tag, Tag) and tag.attrs:
+                for attr in tag.attrs:
+                    del tag.attrs[attr]
         return await llm.chat.completions.create(
             messages=[
                 {
@@ -486,7 +491,7 @@ async def extract_app_info(llm: Instructor, model: str, html: str):
                 {
                     "role": "user",
                     "content": prompt_shopify_app_is_appointment_booking_app.format(
-                        html=html
+                        html=soup.string()
                     ),
                 },
             ],
