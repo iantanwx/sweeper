@@ -34,7 +34,7 @@ NUM_RESULTS_TO_CLASSIFY = 3
 # see https://github.com/openai/openai-cookbook/blob/02525b5f3c97919959007cd55982fb6ef3abc788/examples/How_to_count_tokens_with_tiktoken.ipynb
 TOKENS_PER_NAME = 1
 TOKENS_PER_MESSAGE = 3
-MAX_TOKENS_PER_STORE = 50_000 - TOKENS_PER_NAME - TOKENS_PER_MESSAGE
+MAX_TOKENS_PER_STORE = 10_000 - TOKENS_PER_NAME - TOKENS_PER_MESSAGE
 
 openai_sem = Semaphore(MAX_OPENAI_CONCURRENCY)
 
